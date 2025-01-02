@@ -83,7 +83,7 @@ void EntryFunction(
     // [Task 1]
     // With the playground application running, uncomment the following line and save this file.
 
-    //nodeOutput.ThreadIncrementOutputCount(1); /* <-- uncomment me */
+    nodeOutput.ThreadIncrementOutputCount(1); /* <-- uncomment me */
 
     // This line invokes the "Worker" node below one single time and you should see a second message appearing on sceen.
     // Edit the "Worker" function below to print a personalized hello-world message.

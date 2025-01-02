@@ -137,6 +137,8 @@ struct PrintLabelRecord {
 struct RectangleRecord {
     int2   topLeft;
     float4 color;
+    uint2  dispatchGrid : SV_DispatchGrid;
+    uint2  size;
 };
 
 // Helper function to compute the "position" and "size" for the rectangles from an "index".
@@ -158,7 +160,7 @@ void Entry(
     [MaxRecords(5)]
     // [Task 2]: Change this output to target the "MergeRectangle" node.
     //           Hint: As "FillRectangle" and "MergeRectangle" share the same input node, your change should be rather small.
-    [NodeId("FillRectangle")]
+    [NodeId("MergeRectangle")]
     NodeOutput<RectangleRecord> rectangleOutput)
 {
     // Rectangle position and size for each thread
@@ -186,7 +188,8 @@ void Entry(
     //     You can use the "DivideAndRoundUp(int2 dividend, int2 divisor)" function in Common.h to perform this calculation.
     rectangleOutputRecord.Get().topLeft      = threadRectanglePositon;
     rectangleOutputRecord.Get().color        = UintToColor(dispatchThreadId);
-
+    rectangleOutputRecord.Get().dispatchGrid = DivideAndRoundUp(threadRectangleSize, 8);
+    rectangleOutputRecord.Get().size         = threadRectangleSize;
     rectangleOutputRecord.OutputComplete();
 }
 
@@ -200,7 +203,7 @@ void Entry(
 //     We currently have 5 rectangles, but we want to increase this number later on.
 //     Set the maximum dispatch grid to allow for at least 20 rectangles
 //     (i.e., a rectangle which has a width of RectangleSize + 20 * RectangleSizeStep).
-[NodeDispatchGrid(6, 6, 1)]
+[NodeMaxDispatchGrid(8,8,1)]
 [NumThreads(8, 8, 1)]
 [NodeId("FillRectangle")]
 void FillRectangleNode(
@@ -218,6 +221,7 @@ void FillRectangleNode(
     //    Thus, some thread groups may extend past the size of the rectangle.
     //    Add a check to test if "dispatchThreadId" is within the rectangle size (supplied by the input record).
     if (// Check if pixel is within bounds of render target.
+        all(dispatchThreadId < record.size) &&
         all(pixel >= 0) && all(pixel < RenderSize)) {
         RenderTarget[pixel] = record.color;
     }
@@ -261,10 +265,10 @@ void MergeRectangleNode(
         // [Task 3]: 
         //    Replace the parameters with the data from the input records.
         //    "inputRecords.Get(uint index)" or "inputRecords[uint index]" to access a specific input record.
-        if (ComputeCombinedRect(/* in topLeft0: replace me! */ 0,
-                                /* in size0   : replace me! */ 0,
-                                /* in topLeft1: replace me! */ 1,
-                                /* in size1   : replace me! */ 0,
+        if (ComputeCombinedRect(/* in topLeft0: replace me! */ inputRecords.Get(0).topLeft,
+                                /* in size0   : replace me! */ inputRecords.Get(0).size,
+                                /* in topLeft1: replace me! */ inputRecords.Get(1).topLeft,
+                                /* in size1   : replace me! */ inputRecords.Get(1).size,
                                 /* out */ topLeft,
                                 /* out */ size))
         {
@@ -274,7 +278,13 @@ void MergeRectangleNode(
             //    Compute and set the dispatch size in the same way as you did in the "Entry" node.
             //    You can re-use the color from any of the input records, or compute a new color for
             //    the merged rectangle here.
-
+            ThreadNodeOutputRecords<RectangleRecord> outputRecord =
+                output.GetThreadNodeOutputRecords(1);
+            outputRecord.Get().topLeft      = topLeft;
+            outputRecord.Get().color        = inputRecords.Get(0).color;
+            outputRecord.Get().dispatchGrid       = DivideAndRoundUp(size, 8);
+            outputRecord.Get().size         = size;
+            outputRecord.OutputComplete();
 
             // If we found two rectangles to merge, we can end the node here and thus
             // skip passing the input records through to the "FillRectangle" node.
@@ -283,6 +293,15 @@ void MergeRectangleNode(
             return;
         }
     }
+
+    int input_count = inputRecords.Count();
+    ThreadNodeOutputRecords<RectangleRecord> outputRecord =
+        output.GetThreadNodeOutputRecords(input_count);
+    for(int i = 0;i<input_count;i++) {
+        outputRecord.Get(i) = inputRecords.Get(i);
+    }
+    outputRecord.OutputComplete();
+
     // [Task 2]:
     //     Passthrough all incoming records to the "FillRectangle" output.
     //     Use "inputRecords.Count()" to get the number of input records,

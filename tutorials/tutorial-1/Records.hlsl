@@ -72,6 +72,12 @@ struct PrintBoxRecord {
     int2 index;
 };
 
+struct RectangleRecord {
+    int2 topleft;
+    int2 bottomright;
+    float3 color;
+};
+
 // [Task 2]: Define a struct for the "DrawRectangle" node here!
 
 [Shader("node")]
@@ -114,8 +120,11 @@ void Entry(
     [NodeId("PrintBox")]
     // "PrintBox" declares an input record of type "PrintBoxRecord" (see node declaration below),
     // thus we must specify a "NodeOutput" with a record of the same type.
-    NodeOutput<PrintBoxRecord> boxOutput
+    NodeOutput<PrintBoxRecord> boxOutput,
 
+    [MaxRecords(4)]
+    [NodeId("DrawRectangle")]
+    NodeOutput<RectangleRecord> rectangleOutput
     // [Task 4]: Declare a new "NodeOutput" to the "DrawRectangle" node here using your newly created record struct from Task 2.
     //           Similar to the "boxOutput", we want every thread to be able to request a per-thread output record.
     //           Set the [MaxRecords(...)] attribute accordingly.
@@ -130,6 +139,11 @@ void Entry(
     //           Thus only one thread would have to increment the output count.
     //           Alternatively, you can use "GroupIncrementOutputCount", to increment the output count for
     //           the entire thread group.
+    const bool hasHelloWorldOutput = !all(dispatchThreadId == int2(0, 0));
+    PrintHelloWorld.ThreadIncrementOutputCount(hasHelloWorldOutput ? 1 : 0);
+        
+
+    
 
     // Question: Have a look at the implementation of "PrintHelloWorld". What would happen if we incremented the
     //           output count multiple times?
@@ -176,6 +190,22 @@ void Entry(
     //           zero records for the second thread.
     //           Write all required data to your record. You can use the "BoxSize" constant above to correctly size your rectangle.
     //           Don't forget to call "OutputComplete()" after writing the data to your record.
+
+    const bool hasRectangleOutput = true; 
+    ThreadNodeOutputRecords<RectangleRecord> rectangleOutputRecord = rectangleOutput.GetThreadNodeOutputRecords(hasRectangleOutput ? 1 : 0);
+    if (hasRectangleOutput) {
+        if(all(dispatchThreadId == int2(1, 0))) {
+            rectangleOutputRecord.Get(0).topleft = InitialBoxPosition - int2(BoxMargin, BoxMargin);
+            rectangleOutputRecord.Get(0).bottomright = InitialBoxPosition + int2(4 * (BoxSize.x + BoxMargin), BoxSize.y + BoxMargin) ;
+            rectangleOutputRecord.Get(0).color = float3(1, 0, 0);
+        }
+        else {
+            rectangleOutputRecord.Get(0).topleft = threadBoxPosition;
+            rectangleOutputRecord.Get(0).bottomright = threadBoxPosition + BoxSize;
+            rectangleOutputRecord.Get(0).color = float3(0, 0,0);
+        }
+    }
+    rectangleOutputRecord.OutputComplete();
 
     // [Task 6]: Now we want to emit another record to "DrawRectangle", that draws a rectangle around all of our boxes.
     //           Start by adjusting the "[MaxRecords(...)]" attribute for the output to "DrawRectangle".
@@ -235,10 +265,13 @@ void DrawRectangle(
     // [Task 3]: Declare a node input for the "DrawRectangle" node with your new struct defined in Task 2 here.
     //           Similar to "PrintBox", "DrawRectangle" also uses the "thread" node launch,
     //           thus you must declare your input with "ThreadNodeInputRecord".
+    ThreadNodeInputRecord<RectangleRecord> inputRecord
 )
 {
     // [Task 3]: Use the DrawRect function provided in Common.h to draw a rectanle on screen.
     // Use the data of your input record to pass it as arguments to the DrawRectFunction.
     // DrawRect(...);
+    const RectangleRecord record = inputRecord.Get();
+    DrawRect(record.topleft, record.bottomright, 1, record.color);
 }
 
