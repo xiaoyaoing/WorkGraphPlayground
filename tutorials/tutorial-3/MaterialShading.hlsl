@@ -73,6 +73,50 @@ struct RenderSceneRecord {
 //           Use the [NodeId(...)] attribute to tie all of these nodes together to a single node array.
 //           Tipp: You can use [NodeId("...", (uint)RayHit::Material::...)] to use the "Material" enum instead of hard-coded values.
 
+
+struct PixelShaderRecord {
+    uint2 pixel;
+    Ray ray;
+    float hitDistance;
+};
+
+[Shader("node")]
+[NodeId("ShadePixel", (uint)RayHit::Sky)]
+[NodeLaunch("thread")]
+void ShadePixel_Sky(ThreadNodeInputRecord<PixelShaderRecord> input)
+{
+    // Read input record
+    const PixelShaderRecord record = input.Get();
+
+    // Compute color based on material shading function
+    const float4 color = ShadeSky(record.ray);
+
+    // Write color to pixel
+    WritePixel(record.pixel, color);
+}
+
+[Shader("node")]
+[NodeId("ShadePixel", (uint)RayHit::Sphere)]
+[NodeLaunch("thread")]
+void ShadePixel_Sphere(ThreadNodeInputRecord<PixelShaderRecord> input)
+{
+    const PixelShaderRecord record = input.Get();
+
+    WritePixel(record.pixel, ShadeSphere(record.ray, record.hitDistance));
+}
+
+[Shader("node")]
+[NodeId("ShadePixel", (uint)RayHit::Plane)]
+[NodeLaunch("thread")]
+void ShadePixel_Plane(ThreadNodeInputRecord<PixelShaderRecord> input)
+{
+    const PixelShaderRecord record = input.Get();
+
+    WritePixel(record.pixel, ShadePlane(record.ray, record.hitDistance));
+}
+
+
+
 [Shader("node")]
 [NodeLaunch("broadcasting")]
 [NodeMaxDispatchGrid(512, 512, 1)]
@@ -80,7 +124,7 @@ struct RenderSceneRecord {
 void RenderScene(
     uint2 dispatchThreadId : SV_DispatchThreadID,
 
-    DispatchNodeInputRecord<RenderSceneRecord> inputRecord
+    DispatchNodeInputRecord<RenderSceneRecord> inputRecord,
 
     // [Task 3]: Declare the output to your newly created node array here.
     //           Revisit tutorial-1 for a refresh on node outputs and determine the correct [MaxRecords(...)] attribute.
@@ -88,6 +132,10 @@ void RenderScene(
     //           Additionally, you need to specify the node array size using the [NodeArraySize(...)] attribute.
     //           This is for the runtime to check that the entire node array is actually present in the graph.
     //           See https://microsoft.github.io/DirectX-Specs/d3d/WorkGraphs.html#node-output-declaration for more details.
+    [MaxRecords(8 * 8)]
+    [NodeArraySize(3)]
+    [NodeId("ShadePixel")]
+    NodeOutputArray<PixelShaderRecord> output
 )
 {
     // Scale dispatchThreadId by shading rate,
@@ -107,7 +155,6 @@ void RenderScene(
     // hit distance and material ID in the "RayHit" struct
     const RayHit hit = TraceRay(ray);
 
-    float4 color = float4(0, 0, 0, 1);
 
     // Here we call different shading functions based on the raytracing results.
     // This will lead to divergent code flow on the GPU and can slow down shading if
@@ -117,24 +164,16 @@ void RenderScene(
     // Each node (material shader) then only allocated the resources it actually requires.
     //
     // Here we're only shading three different materials: the sky, a sphere and the plane.
-    switch(hit.material) {
-        case RayHit::Sky:
-            color = ShadeSky(ray);
-            break;
-        case RayHit::Sphere:
-            color = ShadeSphere(ray, hit.distance);
-            break;
-        case RayHit::Plane:
-            color = ShadePlane(ray, hit.distance);
-            break;
-        default:
-            break;
-    }
+
+    ThreadNodeOutputRecords<PixelShaderRecord> outputRecord = output.Get(hit.material).GetThreadNodeOutputRecords(1);
+    outputRecord.Get().pixel = pixel;
+    outputRecord.Get().ray = ray;
+    outputRecord.Get().hitDistance = hit.distance;
+    outputRecord.OutputComplete();
 
     // WritePixel stores the color to all pixels in a sample (see SHADING_RATE above).
     // As Work Graphs does not offer a return-path to the producer node, you task it to move it
     // to each of the material shading nodes.
-    WritePixel(pixel, color);
 
     // [Task 4]: Emit the output to your node array here.
     //           NodeOutputArray provides a []-operator to select the array index for each output request with
